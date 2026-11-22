@@ -82,16 +82,23 @@ bp = Blueprint(PLUGIN_ID, __name__)
 # ---------------------------------------------------------------- settings & regexes
 
 
-def _get_filters():
+def _get_filters(applied_only=False):
+    if applied_only:
+        applied = get_setting("applied_filters", None)
+        if isinstance(applied, dict):
+            return {
+                key: (applied.get(key) or "").strip()
+                for key, _short, _label, _hint in FIELD_SPECS
+            }
     return {
         key: (get_setting(key, "") or "").strip()
         for key, _short, _label, _hint in FIELD_SPECS
     }
 
 
-def _compile_filters(filters=None):
+def _compile_filters(filters=None, applied_only=False):
     """Return (compiled_list, error_dict) where compiled_list is [(key, short_label, pattern), ...]."""
-    filters = filters if filters is not None else _get_filters()
+    filters = filters if filters is not None else _get_filters(applied_only=applied_only)
     compiled = []
     errors = {}
     for key, short_label, _label, _hint in FIELD_SPECS:
@@ -422,7 +429,7 @@ def _install_worker_hook():
         if not tracks:
             return exclusions
         try:
-            compiled, _errors = _compile_filters()
+            compiled, _errors = _compile_filters(applied_only=True)
             if not compiled:
                 return exclusions
 
@@ -994,23 +1001,22 @@ def settings():
             for key, val in submitted.items():
                 set_setting(key, val)
             filters = submitted
-            action = request.form.get("action") or "save"
-            if action in ("preview", "apply"):
-                mode_label = "Dry Run (Preview)" if action == "preview" else "Apply & Purge"
-                try:
-                    enqueue(run_excluder, mode=action, server_scope="all")
-                    msg = (
-                        f"Filters saved. {mode_label} job queued on worker — "
-                        "refresh this page in a few seconds to inspect the detailed report below."
-                    )
-                except Exception as exc:
-                    logger.info("%s: could not enqueue %s: %s", PLUGIN_ID, action, exc)
-                    msg = (
-                        f"Filters saved, but {mode_label} could not start right now because another "
-                        f"queue job is running ({exc}). Try again once the active job finishes."
-                    )
-            else:
-                msg = "Filters saved."
+            action = "apply" if request.form.get("action") == "apply" else "preview"
+            if action == "apply":
+                set_setting("applied_filters", submitted)
+            mode_label = "Dry Run (Preview)" if action == "preview" else "Save & Apply"
+            try:
+                enqueue(run_excluder, mode=action, server_scope="all")
+                msg = (
+                    f"{mode_label} job queued on worker — "
+                    "refresh this page in a few seconds to inspect the detailed report below."
+                )
+            except Exception as exc:
+                logger.info("%s: could not enqueue %s: %s", PLUGIN_ID, action, exc)
+                msg = (
+                    f"{mode_label} could not start right now because another "
+                    f"queue job is running ({exc}). Try again once the active job finishes."
+                )
             return redirect(url_for(f"{PLUGIN_ID}.settings", msg=msg))
 
     msg_arg = request.args.get("msg")
@@ -1050,7 +1056,6 @@ def settings():
         '<div class="actions">'
         '<button type="submit" name="action" value="preview" class="btn btn-primary">Dry Run (Preview)</button>'
         '<button type="submit" name="action" value="apply" class="btn btn-primary">Save &amp; Apply</button>'
-        '<button type="submit" name="action" value="save" class="btn">Save Only</button>'
         '<a href="'
         + url_for(f"{PLUGIN_ID}.settings")
         + '" class="btn" style="text-decoration:none">Refresh Results</a>'
