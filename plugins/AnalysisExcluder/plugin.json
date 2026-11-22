@@ -1,0 +1,16 @@
+{
+  "id": "analysis_excluder",
+  "name": "Analysis Blocklist",
+  "author": "alghostzx",
+  "description": "Excludes tracks matching Title, Album, Artist, Filename/Path, or Genre regex patterns from AI analysis, purges already-analyzed matching tracks from the vector database, and unblocks tracks when filters are relaxed.",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "min_core_version": "3.2.0",
+      "changelog": "Initial release: Title, Album, Artist, Filename/Path, and Genre regex blocklist, Dry Run preview, Apply & Purge with automatic IVF index rebuild, unblock reminder on filter relaxation, and real-time worker analysis interception.",
+      "imageUrl": "",
+      "sourceUrl": "https://raw.githubusercontent.com/alghostzx/AudioMuse-Analysis-Excluder/main/dist/analysis_excluder/analysis_excluder_1.0.0.zip",
+      "checksum": "0132fa5627b9eca4a99299aeea804d01"
+    }
+  ]
+}

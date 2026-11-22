@@ -1,0 +1,11 @@
+{
+  "plugins": [
+    {
+      "id": "analysis_excluder",
+      "name": "Analysis Blocklist",
+      "author": "alghostzx",
+      "description": "Excludes tracks matching Title, Album, Artist, Filename/Path, or Genre regex patterns from AI analysis, purges already-analyzed matching tracks from the vector database, and unblocks tracks when filters are relaxed.",
+      "pluginUrl": "https://raw.githubusercontent.com/alghostzx/AudioMuse-Analysis-Excluder/main/plugins/AnalysisExcluder/plugin.json"
+    }
+  ]
+}
