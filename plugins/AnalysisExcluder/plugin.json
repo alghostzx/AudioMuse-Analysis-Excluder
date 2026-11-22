@@ -10,7 +10,7 @@
       "changelog": "Initial release: Title, Album, Artist, Filename/Path, and Genre regex blocklist, Dry Run preview, Apply & Purge with automatic IVF index rebuild, unblock reminder on filter relaxation, and real-time worker analysis interception.",
       "imageUrl": "",
       "sourceUrl": "https://raw.githubusercontent.com/alghostzx/AudioMuse-Analysis-Excluder/main/dist/analysis_excluder/analysis_excluder_1.0.0.zip",
-      "checksum": "0f7b5bc4954426881ec7f47624d60130"
+      "checksum": "bb5d246c6cf7c9229c18607419af06fa"
     }
   ]
 }

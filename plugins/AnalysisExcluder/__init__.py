@@ -464,6 +464,9 @@ def _install_worker_hook():
                 pid = str(provider_item_id(item) or "")
                 if not pid:
                     continue
+                existing_excl = exclusions.get(pid)
+                if existing_excl and ah.analysis_exclusion_matches(item, existing_excl):
+                    continue
                 matched_fields = _match_track_dict(item, compiled)
                 if not matched_fields:
                     continue
@@ -817,6 +820,8 @@ def run_excluder(mode="preview"):
             ],
             "unblocked_tracks": [
                 {
+                    "server_id": server_id,
+                    "provider_item_id": u["provider_item_id"],
                     "title": u["title"],
                     "artist": u["artist"],
                     "album": u["album"],
@@ -954,27 +959,85 @@ def _runs_html():
 
 
 def _unblocked_reminder_html():
-    rows = _recent_runs(limit=5)
-    for _id, ran_at, server_name, mode, status, _message, summary_json in rows:
-        if mode == "apply" and status == "ok" and summary_json:
-            try:
-                s = json.loads(summary_json)
-                unblocked = int(s.get("unblocked_count") or 0)
-                if unblocked > 0:
-                    return (
-                        '<div class="msg warn">'
-                        f"<strong>Reminder ({html.escape(str(ran_at))}):</strong> "
-                        f"{unblocked} track(s) on <strong>{html.escape(str(server_name))}</strong> that were "
-                        "previously blocked by this plugin no longer match your current filters and have been "
-                        "unblocked. They are now pending AI analysis — remember to trigger a manual analysis "
-                        "or verify that your daily analysis schedule is enabled under "
-                        "<strong>Administration &gt; Scheduled Tasks</strong>."
-                        "</div>"
-                    )
-            except Exception:
-                pass
-            break
-    return ""
+    dismissed_id = int(get_setting("dismissed_reminder_run_id", 0) or 0)
+    db = get_db()
+    cur = db.cursor()
+    try:
+        cur.execute(
+            "SELECT id, ran_at, to_char(ran_at, 'YYYY-MM-DD HH24:MI:SS'), server_name, summary "
+            "FROM "
+            + table("runs")
+            + " WHERE mode = 'apply' AND status = 'ok' ORDER BY id DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        if not row:
+            return ""
+        run_id, ran_at_raw, ran_at_str, server_name, summary_json = row
+        if run_id <= dismissed_id or not summary_json:
+            return ""
+
+        s = json.loads(summary_json)
+        unblocked_total = int(s.get("unblocked_count") or 0)
+        if unblocked_total <= 0:
+            return ""
+
+        # Auto-clear 1: if a main_analysis task completed with SUCCESS after this apply run
+        cur.execute(
+            "SELECT 1 FROM task_status "
+            "WHERE task_type = 'main_analysis' AND status = 'SUCCESS' AND timestamp >= %s LIMIT 1",
+            (ran_at_raw,),
+        )
+        if cur.fetchone():
+            return ""
+
+        # Auto-clear 2: if specific unblocked provider_item_ids were recorded, check how many are still unanalyzed
+        unblocked_items = s.get("unblocked_tracks") or []
+        pairs = [
+            (it.get("server_id"), it.get("provider_item_id"))
+            for it in unblocked_items
+            if it.get("server_id") and it.get("provider_item_id")
+        ]
+        pending_count = unblocked_total
+        if pairs:
+            cur.execute(
+                "SELECT provider_track_id FROM track_server_map WHERE (server_id, provider_track_id) IN %s",
+                (tuple(pairs),),
+            )
+            analyzed_pids = {r[0] for r in cur.fetchall()}
+            cur.execute(
+                "SELECT provider_item_id FROM analysis_exclusions WHERE (server_id, provider_item_id) IN %s",
+                (tuple(pairs),),
+            )
+            reexcluded_pids = {r[0] for r in cur.fetchall()}
+            remaining = [
+                pid for _sid, pid in pairs if pid not in analyzed_pids and pid not in reexcluded_pids
+            ]
+            if not remaining and len(pairs) >= unblocked_total:
+                return ""
+            if len(pairs) >= unblocked_total:
+                pending_count = len(remaining)
+
+        return (
+            '<div class="msg warn" style="display:flex;align-items:center;justify-content:space-between;gap:1rem">'
+            "<div>"
+            f"<strong>Reminder ({html.escape(str(ran_at_str))}):</strong> "
+            f"{pending_count} track(s) on <strong>{html.escape(str(server_name))}</strong> that were "
+            "previously blocked by this plugin no longer match your current filters and are pending AI analysis. "
+            "Remember to trigger a manual analysis or verify that your daily analysis schedule is enabled under "
+            "<strong>Administration &gt; Scheduled Tasks</strong>."
+            "</div>"
+            '<form method="post" style="margin:0;flex-shrink:0">'
+            f'<input type="hidden" name="dismiss_run_id" value="{int(run_id)}">'
+            '<button type="submit" name="action" value="dismiss_reminder" class="btn" '
+            'style="white-space:nowrap">Dismiss</button>'
+            "</form>"
+            "</div>"
+        )
+    except Exception:
+        db.rollback()
+        return ""
+    finally:
+        cur.close()
 
 
 @bp.route("/")
@@ -988,6 +1051,15 @@ def settings():
     notice = ""
 
     if request.method == "POST":
+        if request.form.get("action") == "dismiss_reminder":
+            try:
+                run_id = int(request.form.get("dismiss_run_id") or 0)
+                if run_id > 0:
+                    set_setting("dismissed_reminder_run_id", run_id)
+            except ValueError:
+                pass
+            return redirect(url_for(f"{PLUGIN_ID}.settings"))
+
         submitted = {
             key: (request.form.get(key) or "").strip()
             for key, _short, _label, _hint in FIELD_SPECS
